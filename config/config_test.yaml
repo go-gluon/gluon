@@ -1,0 +1,20 @@
+app:
+  db:
+    user: test_user
+    password: test_password
+    database: test
+    example:
+      - asd
+      - cdf
+    second:
+      - data: 123
+        name: "hura"
+      - data: 789
+        name: latest
+property: "test1"
+
++dev:
+  app:
+    db:
+      user: test_user_dev
+  property: "test1-dev"
