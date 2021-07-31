@@ -25,29 +25,6 @@ type EnvConfigSource struct {
 
 func (f *EnvConfigSource) Init() error {
 	f.envs = map[string]string{}
-	return f.parseEnv()
-}
-
-func (f *EnvConfigSource) Priority() int {
-	return 300
-}
-
-func (f *EnvConfigSource) Name() string {
-	return `env`
-}
-
-func (f *EnvConfigSource) Property(name string) (string, bool, error) {
-	tmp := envRegexp.ReplaceAllString(name, "_")
-	tmp = strings.ToUpper(tmp)
-	v, e := f.envs[tmp]
-	return v, e, nil
-}
-
-func (f *EnvConfigSource) Properties() (map[string]string, error) {
-	return f.envs, nil
-}
-
-func (f *EnvConfigSource) parseEnv() error {
 	items := os.Environ()
 	if len(items) > 0 {
 		for _, item := range items {
@@ -56,4 +33,11 @@ func (f *EnvConfigSource) parseEnv() error {
 		}
 	}
 	return nil
+}
+
+func (f *EnvConfigSource) GetRawValue(name string) (string, bool, error) {
+	tmp := envRegexp.ReplaceAllString(name, "_")
+	tmp = strings.ToUpper(tmp)
+	v, e := f.envs[tmp]
+	return v, e, nil
 }

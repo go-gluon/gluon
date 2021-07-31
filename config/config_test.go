@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -15,12 +17,18 @@ type ConfigStruct struct {
 	Index     int64  `config:"app.db.second[1].data"`
 }
 
+type ConfigStruct2Data struct {
+	Name  string `config:"name"`
+	Value int    `config:"value"`
+}
 type ConfigStruct2 struct {
 	Property string `config:"property"`
 	App      struct {
 		Db struct {
-			User     string `config:"user"`
-			Password string `config:"password"`
+			User     string                       `config:"user"`
+			Password string                       `config:"password"`
+			List     []string                     `config:"list"`
+			Data     map[string]ConfigStruct2Data `config:"data"`
 		} `config:"db"`
 	} `config:"app"`
 }
@@ -35,39 +43,64 @@ type Config struct {
 
 func TestExtension(t *testing.T) {
 
-	tec := TestExtensionConfig{
-		Config: &Config{},
-	}
-
 	d := os.DirFS(".")
-	err := Default.AddYaml(d)
+	err := Default.LoadYaml(d)
 	assert.Nil(t, err)
 
-	err = Default.Extension("test", tec.Config)
-	assert.Nil(t, err)
+	c := ConfigStruct2{}
+	db := Default.Root().Map("app").Map("db")
+
+	c.App.Db.User = db.String("user", "defaultValue1")
+	assert.Equal(t, "test_user", c.App.Db.User)
+	c.App.Db.Password = db.String("password", "defaultValue1")
+	assert.Equal(t, "test_password", c.App.Db.Password)
+
+	c.App.Db.List = db.StringL("list", nil)
+	assert.Equal(t, 2, len(c.App.Db.List))
+
+	data := db.Map("data")
+	if c.App.Db.Data == nil {
+		c.App.Db.Data = map[string]ConfigStruct2Data{}
+	}
+	for _, key := range data.Keys() {
+		cc := ConfigStruct2Data{}
+		item := data.Map(key)
+		cc.Name = item.String("name", "")
+		cc.Value = item.Int("value", -1)
+		c.App.Db.Data[key] = cc
+	}
+	assert.Equal(t, 2, len(c.App.Db.Data))
+	assert.Equal(t, "n1", c.App.Db.Data["key1"].Name)
+	assert.Equal(t, 123, c.App.Db.Data["key1"].Value)
+
+	r := Default.Root()
+	assert.Equal(t, -9223372036854775808, r.Int("int", 0))
+	assert.Equal(t, 1.34, r.Float("float", 0))
+	assert.Equal(t, "2018-01-09 10:40:47 +0000 UTC", fmt.Sprintf("%v", r.Time("time", time.Now())))
 }
 
-func TestInput(t *testing.T) {
+func TestExtensionProfileDev(t *testing.T) {
 
 	d := os.DirFS(".")
-	err := Default.AddYaml(d)
+	Default.SetProfile("dev")
+	err := Default.LoadYaml(d)
 	assert.Nil(t, err)
 
-	assert.Equal(t, "NO_VALUE", Default.Property("db.user", "NO_VALUE"))
-	assert.Equal(t, "test_user", Default.Property("app.db.user", "NO_VALUE"))
-	assert.Equal(t, "789", Default.Property("app.db.second[1].data", "NO_VALUE"))
-	assert.Equal(t, 789, Default.PropertyInt("app.db.second[1].data", 0))
+	c := ConfigStruct2{}
+	db := Default.Root().Map("app").Map("db")
+	c.App.Db.User = db.String("user", "defaultValue1")
+	assert.Equal(t, "test_user_dev", c.App.Db.User)
+}
 
-	assert.Equal(t, "NO_VALUE", Default.Property("no-property", "NO_VALUE"))
-	assert.Equal(t, "test1", Default.Property("property", "NO_VALUE"))
+func TestExtensionProfileTest(t *testing.T) {
 
-	input := &ConfigStruct{Property2: "default_value"}
-	err = Default.Properties(input)
+	d := os.DirFS(".")
+	Default.SetProfile("test")
+	err := Default.LoadYaml(d)
 	assert.Nil(t, err)
-	t.Logf("Input %v\n", input)
 
-	input2 := &ConfigStruct2{}
-	err = Default.Properties(input2)
-	assert.Nil(t, err)
-	t.Logf("Input2 %v\n", input2)
+	c := ConfigStruct2{}
+	db := Default.Root().Map("app").Map("db")
+	c.App.Db.User = db.String("user", "defaultValue1")
+	assert.Equal(t, "defaultValue1", c.App.Db.User)
 }

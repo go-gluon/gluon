@@ -1,16 +1,22 @@
+float: 1.34
+int: -9223372036854775808
+bool: true
+time: 2018-01-09T10:40:47Z
 app:
   db:
     user: test_user
     password: test_password
     database: test
-    example:
+    list:
       - asd
       - cdf
-    second:
-      - data: 123
-        name: "hura"
-      - data: 789
-        name: latest
+    data:
+      key1:
+        name: n1
+        value: 123
+      key2:
+        name: n2
+        value: 456
 property: "test1"
 
 +dev:
@@ -18,3 +24,11 @@ property: "test1"
     db:
       user: test_user_dev
   property: "test1-dev"
+  extend:
+    key:
+      value: 1
+
++test:
+  app:
+    db:
+      user:      

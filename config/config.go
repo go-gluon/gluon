@@ -1,26 +1,9 @@
 package config
 
 import (
-	"errors"
-	"fmt"
-	"reflect"
-	"sort"
-	"strconv"
+	"io/fs"
+	"time"
 )
-
-// ConfigSource configuration source interface
-type ConfigSource interface {
-	// Init initialize method
-	Init() error
-	// Name of the configuration source
-	Name() string
-	// Priority of the configuration source
-	Priority() int
-	// Properties is the map of all avaiable properties in the configuration source
-	Properties() (map[string]string, error)
-	// Property get property by the name
-	Property(name string) (string, bool, error)
-}
 
 const (
 	configPrefix = "gluon."
@@ -30,28 +13,41 @@ var (
 	// Default configuration source provider instance
 	Default *ConfigSourceProvider
 	// ConfigProfileProperty configuration profile property
-	ConfigProfileProperty = "config.profile"
+	configProfileProperty = configPrefix + "config.profile"
 )
+
+type ConfigReader interface {
+	ReadFromSource(node MapNode)
+}
+
+// ConfigSource configuration source interface
+type ConfigSource interface {
+	// Init initialize method
+	Init() error
+
+	GetRawValue(name string) (string, bool, error)
+}
 
 // init initialize default configuration
 func init() {
+
+	// initialize config sources
+	sources := []ConfigSource{&EnvConfigSource{}, &FlagsConfigSource{}}
+	for _, s := range sources {
+		err := s.Init()
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	// create default configuration source provider
-	Default = &ConfigSourceProvider{}
-
-	// environment configuration
-	e := &EnvConfigSource{}
-
-	// flags parameter configurations
-	f := &FlagsConfigSource{}
-
-	// add default configuration sources
-	err := Default.Add(f, e)
-	if err != nil {
-		panic(err)
+	Default = &ConfigSourceProvider{
+		data:    map[interface{}]interface{}{},
+		sources: sources,
 	}
 
 	// set profile
-	profile := Default.Property(ConfigProfileProperty, "")
+	profile := Default.getRawValue(configProfileProperty, "")
 	if len(profile) > 0 {
 		Default.SetProfile(profile)
 	}
@@ -59,9 +55,9 @@ func init() {
 
 // ConfigSourceProvider configuration source provider
 type ConfigSourceProvider struct {
-	sources    []ConfigSource
-	profile    string
-	profileOrg string
+	sources []ConfigSource
+	data    map[interface{}]interface{}
+	profile string
 }
 
 // SetProfile set profile to default provider
@@ -76,9 +72,8 @@ func Profile() string {
 
 // SetProfile set configuration profile to provider
 func (c *ConfigSourceProvider) SetProfile(profile string) {
-	c.profileOrg = profile
 	if len(profile) > 0 {
-		c.profile = "+" + profile + "."
+		c.profile = `+` + profile
 	} else {
 		c.profile = ""
 	}
@@ -89,190 +84,277 @@ func (c *ConfigSourceProvider) Profile() string {
 	return c.profile
 }
 
-// Properties setup the properties in the structure base on the tags
-func Properties(value interface{}) error {
-	return Default.Properties(value)
+func GetRawValue(name string, default_value string) string {
+	return Default.getRawValue(name, default_value)
 }
 
-// Extension setup the properties in the structure base on the tags
-func Extension(name string, value interface{}) error {
-	return Default.Extension(name, value)
-}
-
-// Properties setup the properties in the structure base on the tags
-func (c *ConfigSourceProvider) Properties(value interface{}) error {
-	if reflect.ValueOf(value).Kind() != reflect.Ptr {
-		return errors.New("Configuration properties is not pointer to struct")
+func (c *ConfigSourceProvider) getRawValue(name string, default_value string) string {
+	for _, s := range c.sources {
+		v, e, _ := s.GetRawValue(name)
+		if e {
+			return v
+		}
 	}
-	c.properties("", value)
+	return default_value
+}
+
+func (c *ConfigSourceProvider) LoadYaml(resources fs.FS) error {
+	data, err := loadYaml(resources)
+	if err != nil {
+		return err
+	}
+	c.data = data
+	if len(c.profile) > 0 {
+		c.mergeProfile()
+	}
 	return nil
 }
 
-// Extension setup the properties in the structure base on the tags
-func (c *ConfigSourceProvider) Extension(name string, value interface{}) error {
-	if reflect.ValueOf(value).Kind() != reflect.Ptr {
-		return errors.New("Extension configuration is not pointer to struct")
-	}
-	c.properties(configPrefix+name, value)
-	return nil
-}
-
-// add properties to the struct
-func (c *ConfigSourceProvider) properties(prefix string, value interface{}) {
-	original := reflect.ValueOf(value)
-	kind := original.Kind()
-	if kind == reflect.Ptr || kind == reflect.Interface {
-		original = reflect.Indirect(original)
-	} else {
+func (c *ConfigSourceProvider) mergeProfile() {
+	if len(c.profile) == 0 {
 		return
 	}
-
-	typeof := reflect.TypeOf(value)
-	if typeof.Kind() == reflect.Ptr {
-		typeof = typeof.Elem()
+	d, e := c.data[c.profile]
+	if !e {
+		return
 	}
-
-	// fmt.Printf("NumField: %v\n", typeof.NumField())
-	for i := 0; i < typeof.NumField(); i++ {
-		f := typeof.Field(i)
-		prop := f.Name
-		tag, ok := f.Tag.Lookup("config")
-		if ok {
-			prop = tag
-		}
-		if prefix != "" {
-			prop = prefix + "." + tag
-		}
-		field := original.Field(i)
-		switch field.Kind() {
-		case reflect.String:
-			tmp := c.Property(prop, field.String())
-			field.SetString(tmp)
-		case reflect.Float32, reflect.Float64:
-			tmp := c.Property(prop, toString(field.Float()))
-			f, _ := strconv.ParseFloat(tmp, 64)
-			field.SetFloat(f)
-		case reflect.Int, reflect.Int16, reflect.Int32, reflect.Int64:
-			tmp := c.Property(prop, toString(field.Int()))
-			f, _ := strconv.ParseInt(tmp, 10, 0)
-			field.SetInt(f)
-		case reflect.Bool:
-			tmp := c.Property(prop, toString(field.Bool()))
-			b, _ := strconv.ParseBool(tmp)
-			field.SetBool(b)
-		case reflect.Struct:
-
-			fval := reflect.New(f.Type)
-			c.properties(prop, fval.Interface())
-			field.Set(fval.Elem())
-		default:
-			fmt.Printf("Not supported field: %v type: %v\n", f.Name, field.Kind())
-		}
-
+	data, ee := d.(map[interface{}]interface{})
+	if !ee {
+		return
 	}
-
+	merge(data, c.data)
 }
 
-// PropertyBool bool value property from the default configuration source provider
-func PropertyBool(name string, defaultValue bool) bool {
-	return Default.PropertyBool(name, defaultValue)
+func merge(profile, config map[interface{}]interface{}) {
+
+	for key, value := range profile {
+
+		// // skip nil values
+		// if value == nil {
+		// 	continue
+		// }
+
+		// config does not exists
+		cv, ce := config[key]
+		if !ce {
+			config[key] = value
+			continue
+		}
+
+		// value is not map
+		v, ok := value.(map[interface{}]interface{})
+		if !ok {
+			config[key] = value
+			continue
+		}
+
+		// merge children
+		merge(v, cv.(map[interface{}]interface{}))
+	}
 }
 
-// PropertyBool bool value property from the configuration source provider
-func (c *ConfigSourceProvider) PropertyBool(name string, defaultValue bool) bool {
-	value, exists := c.findProperty(name)
-	if exists {
-		tmp, err := strconv.ParseBool(value)
-		if err != nil {
-			//TODO: debug log
-			return defaultValue
+func (c *ConfigSourceProvider) Root() MapNode {
+	return MapNode{
+		data:   c.data,
+		parent: "",
+	}
+}
+
+var (
+	emptyMapNode = MapNode{}
+)
+
+func parentKey(parent, key string) string {
+	if len(parent) > 0 {
+		key = "." + key
+	}
+	return parent + key
+}
+
+type MapNode struct {
+	change bool
+	parent string
+	data   map[interface{}]interface{}
+}
+
+func (m MapNode) Size() int {
+	return len(m.data)
+}
+
+func (m MapNode) IsEmpty() bool {
+	return 0 == m.Size()
+}
+
+func newMapNode(data map[interface{}]interface{}, parent, key string) MapNode {
+	return MapNode{
+		data:   data,
+		parent: parentKey(parent, key),
+	}
+}
+
+func (m MapNode) Keys() []string {
+	keys := []string{}
+	if len(m.data) > 0 {
+		for k := range m.data {
+			if v, ok := k.(string); ok {
+				keys = append(keys, v)
+			}
+		}
+	}
+	return keys
+}
+
+func (m MapNode) Map(key string) MapNode {
+	value, e := m.data[key]
+	if e {
+		return newMapNode(value.(map[interface{}]interface{}), m.parent, key)
+	}
+	if m.change {
+		v := map[interface{}]interface{}{}
+		m.data[key] = v
+		return newMapNode(v, m.parent, key)
+	}
+	return emptyMapNode
+}
+
+func (m MapNode) String(key string, dv string) string {
+	value, e := m.data[key]
+	if e && value != nil {
+		return value.(string)
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) Int(key string, dv int) int {
+	value, e := m.data[key]
+	if e && value != nil {
+		return value.(int)
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) Float(key string, dv float64) float64 {
+	value, e := m.data[key]
+	if e && value != nil {
+		return value.(float64)
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) Bool(key string, dv bool) bool {
+	value, e := m.data[key]
+	if e && value != nil {
+		return value.(bool)
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) Duration(key string, dv time.Duration) time.Duration {
+	value, e := m.data[key]
+	if e && value != nil {
+		tmp := value.(string)
+		t, e := time.ParseDuration(tmp)
+		if e == nil {
+			return t
+		}
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) Time(key string, dv time.Time) time.Time {
+	value, e := m.data[key]
+	if e && value != nil {
+		tmp := value.(string)
+		t, e := time.Parse(time.RFC3339Nano, tmp)
+		if e == nil {
+			return t
+		}
+		t, e = time.Parse(time.RFC3339, tmp)
+		if e == nil {
+			return t
+		}
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) StringL(key string, dv []string) []string {
+	value, e := m.data[key]
+	if e && value != nil {
+		list := value.([]interface{})
+		tmp := make([]string, len(list))
+		for i, item := range list {
+			tmp[i] = item.(string)
 		}
 		return tmp
 	}
-	return defaultValue
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
 }
 
-// PropertyInt int value property from the default configuration source provider
-func PropertyInt(name string, defaultValue int) int {
-	return Default.PropertyInt(name, defaultValue)
-}
-
-// PropertyInt int value property from the configuration source provider
-func (c *ConfigSourceProvider) PropertyInt(name string, defaultValue int) int {
-	value, exists := c.findProperty(name)
-	if exists {
-		tmp, err := strconv.Atoi(value)
-		if err != nil {
-			//TODO: debug log
-			return defaultValue
+func (m MapNode) IntL(key string, dv []int) []int {
+	value, e := m.data[key]
+	if e && value != nil {
+		list := value.([]interface{})
+		tmp := make([]int, len(list))
+		for i, item := range list {
+			tmp[i] = item.(int)
 		}
 		return tmp
 	}
-	return defaultValue
-}
-
-// Property string value property from the default configuration source provider
-func Property(name string, defaultValue string) string {
-	return Default.Property(name, defaultValue)
-}
-
-// Property string value property from the configuration source provider
-func (c *ConfigSourceProvider) Property(name, defaultValue string) string {
-	value, exists := c.findProperty(name)
-	if exists {
-		return value
+	if m.change {
+		m.data[key] = dv
 	}
-	return defaultValue
+	return dv
 }
 
-// Add methods add configuration sources to the default provider
-func Add(s ...ConfigSource) error {
-	return Default.Add(s...)
-}
-
-// Add methods add configuration sources
-func (c *ConfigSourceProvider) Add(s ...ConfigSource) error {
-	if len(s) > 0 {
-		for _, item := range s {
-			err := item.Init()
-			if err != nil {
-				return err
-			}
-			c.sources = append(c.sources, item)
+func (m MapNode) FloatL(key string, dv []float64) []float64 {
+	value, e := m.data[key]
+	if e && value != nil {
+		list := value.([]interface{})
+		tmp := make([]float64, len(list))
+		for i, item := range list {
+			tmp[i] = item.(float64)
 		}
+		return tmp
 	}
-	sort.SliceStable(c.sources, func(i, j int) bool {
-		return c.sources[i].Priority() > c.sources[j].Priority()
-	})
-	return nil
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
 }
 
-func (c *ConfigSourceProvider) findProperty(name string) (string, bool) {
-	if len(c.sources) > 0 {
-		for _, source := range c.sources {
-			if len(c.profile) > 0 {
-				value, exists, err := source.Property(c.profile + name)
-				if err != nil {
-					//TODO: debug log
-					return "", false
-				}
-				if exists {
-					return value, true
-				}
-			}
-			value, exists, err := source.Property(name)
-			if err != nil {
-				//TODO: debug log
-				return "", false
-			}
-			if exists {
-				return value, true
-			}
+func (m MapNode) BoolL(key string, dv []bool) []bool {
+	value, e := m.data[key]
+	if e && value != nil {
+		list := value.([]interface{})
+		tmp := make([]bool, len(list))
+		for i, item := range list {
+			tmp[i] = item.(bool)
 		}
+		return tmp
 	}
-	return "", false
-}
-
-func toString(data interface{}) string {
-	return fmt.Sprintf("%v", data)
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
 }

@@ -7,37 +7,13 @@ import (
 )
 
 type FlagsConfigSource struct {
-	cmd   []string
 	args  []string
 	flags map[string]string
 }
 
-func (f *FlagsConfigSource) Priority() int {
-	return 200
-}
-
-func (f *FlagsConfigSource) Name() string {
-	return `flags`
-}
-
 func (f *FlagsConfigSource) Init() error {
-	f.cmd = os.Args[1:]
 	f.flags = map[string]string{}
-	return f.parseArgs()
-}
-
-func (f *FlagsConfigSource) Property(name string) (string, bool, error) {
-	tmp := strings.ReplaceAll(name, ".", "-")
-	v, e := f.flags[tmp]
-	return v, e, nil
-}
-
-func (f *FlagsConfigSource) Properties() (map[string]string, error) {
-	return f.flags, nil
-}
-
-func (f *FlagsConfigSource) parseArgs() error {
-	f.args = f.cmd
+	f.args = os.Args[1:]
 	for {
 		seen, err := f.parseOne()
 		if seen {
@@ -49,6 +25,12 @@ func (f *FlagsConfigSource) parseArgs() error {
 		return err
 	}
 	return nil
+}
+
+func (f *FlagsConfigSource) GetRawValue(name string) (string, bool, error) {
+	tmp := strings.ReplaceAll(name, ".", "-")
+	v, e := f.flags[tmp]
+	return v, e, nil
 }
 
 func (f *FlagsConfigSource) parseOne() (bool, error) {
