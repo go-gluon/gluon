@@ -28,7 +28,7 @@ var extensions []Extension
 func RegisterExtensions(resources *embed.FS, providers ...ExtensionProvider) error {
 	// core modules
 	if resources != nil {
-		err := config.Default.LoadYaml(resources)
+		err := config.Default.Init(resources)
 		if err != nil {
 			panic(err)
 		}

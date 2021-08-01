@@ -2,6 +2,8 @@ package config
 
 import (
 	"io/fs"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -44,20 +46,13 @@ func init() {
 	Default = &ConfigSourceProvider{
 		data:    map[interface{}]interface{}{},
 		sources: sources,
+		cache:   map[string]void{},
 	}
 
 	// set profile
-	profile := Default.getRawValue(configProfileProperty, "")
-	if len(profile) > 0 {
+	if profile, e := Default.getSourceRawValue(configProfileProperty); e {
 		Default.SetProfile(profile)
 	}
-}
-
-// ConfigSourceProvider configuration source provider
-type ConfigSourceProvider struct {
-	sources []ConfigSource
-	data    map[interface{}]interface{}
-	profile string
 }
 
 // SetProfile set profile to default provider
@@ -68,6 +63,16 @@ func SetProfile(profile string) {
 // Profile of the default configuration source provider
 func Profile() string {
 	return Default.profile
+}
+
+type void struct{}
+
+// ConfigSourceProvider configuration source provider
+type ConfigSourceProvider struct {
+	sources []ConfigSource
+	data    map[interface{}]interface{}
+	profile string
+	cache   map[string]void
 }
 
 // SetProfile set configuration profile to provider
@@ -84,55 +89,61 @@ func (c *ConfigSourceProvider) Profile() string {
 	return c.profile
 }
 
-func GetRawValue(name string, default_value string) string {
-	return Default.getRawValue(name, default_value)
+func (c *ConfigSourceProvider) isProfile() bool {
+	return len(c.profile) > 0
 }
 
-func (c *ConfigSourceProvider) getRawValue(name string, default_value string) string {
+func (c *ConfigSourceProvider) getSourceValue(parent, key string) (string, bool) {
+	key = parent + "." + key
+	if _, e := c.cache[key]; e {
+		return "", false
+	}
+
+	c.cache[key] = void{}
+
 	for _, s := range c.sources {
-		v, e, _ := s.GetRawValue(name)
-		if e {
-			return v
+		if c.isProfile() {
+			if v, e, _ := s.GetRawValue(c.profile + "." + key); e {
+				return v, true
+			}
+		}
+		if v, e, _ := s.GetRawValue(key); e {
+			return v, true
 		}
 	}
-	return default_value
+	return "", false
 }
 
-func (c *ConfigSourceProvider) LoadYaml(resources fs.FS) error {
+func (c *ConfigSourceProvider) getSourceRawValue(name string) (string, bool) {
+	for _, s := range c.sources {
+		if v, e, _ := s.GetRawValue(name); e {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func (c *ConfigSourceProvider) Init(resources fs.FS) error {
 	data, err := loadYaml(resources)
 	if err != nil {
 		return err
 	}
 	c.data = data
-	if len(c.profile) > 0 {
-		c.mergeProfile()
+
+	// merge profile
+	if c.isProfile() {
+		if d, e := c.data[c.profile]; e {
+			if data, ee := d.(map[interface{}]interface{}); ee {
+				merge(data, c.data)
+			}
+		}
 	}
 	return nil
-}
-
-func (c *ConfigSourceProvider) mergeProfile() {
-	if len(c.profile) == 0 {
-		return
-	}
-	d, e := c.data[c.profile]
-	if !e {
-		return
-	}
-	data, ee := d.(map[interface{}]interface{})
-	if !ee {
-		return
-	}
-	merge(data, c.data)
 }
 
 func merge(profile, config map[interface{}]interface{}) {
 
 	for key, value := range profile {
-
-		// // skip nil values
-		// if value == nil {
-		// 	continue
-		// }
 
 		// config does not exists
 		cv, ce := config[key]
@@ -153,16 +164,55 @@ func merge(profile, config map[interface{}]interface{}) {
 	}
 }
 
-func (c *ConfigSourceProvider) Root() MapNode {
-	return MapNode{
-		data:   c.data,
-		parent: "",
-	}
+func (c *ConfigSourceProvider) Map() MapNode {
+	return newMapNode(c, c.data, "", "")
 }
 
-var (
-	emptyMapNode = MapNode{}
-)
+func (c *ConfigSourceProvider) String(key string, dv string) string {
+	m, k := c.findMap(key)
+	return m.String(k, dv)
+}
+
+func (c *ConfigSourceProvider) Int(key string, dv int) int {
+	m, k := c.findMap(key)
+	return m.Int(k, dv)
+}
+
+func (c *ConfigSourceProvider) Float(key string, dv float64) float64 {
+	m, k := c.findMap(key)
+	return m.Float(k, dv)
+}
+
+func (c *ConfigSourceProvider) Bool(key string, dv bool) bool {
+	m, k := c.findMap(key)
+	return m.Bool(k, dv)
+}
+
+func (c *ConfigSourceProvider) Time(key string, dv time.Time) time.Time {
+	m, k := c.findMap(key)
+	return m.Time(k, dv)
+}
+
+func (c *ConfigSourceProvider) Duration(key string, dv time.Duration) time.Duration {
+	m, k := c.findMap(key)
+	return m.Duration(k, dv)
+}
+
+func (c *ConfigSourceProvider) findMap(key string) (MapNode, string) {
+	if len(key) == 0 {
+		return MapNode{}, key
+	}
+	items := strings.Split(key, ".")
+
+	n := c.Map()
+	var i int
+	for i = 0; i < len(items)-1 && !n.IsEmpty(); i++ {
+		n = n.Map(items[i])
+	}
+	return n, items[len(items)-1]
+}
+
+var emptyMapNode = MapNode{}
 
 func parentKey(parent, key string) string {
 	if len(parent) > 0 {
@@ -172,9 +222,10 @@ func parentKey(parent, key string) string {
 }
 
 type MapNode struct {
-	change bool
-	parent string
-	data   map[interface{}]interface{}
+	provider *ConfigSourceProvider
+	change   bool
+	parent   string
+	data     map[interface{}]interface{}
 }
 
 func (m MapNode) Size() int {
@@ -185,10 +236,11 @@ func (m MapNode) IsEmpty() bool {
 	return 0 == m.Size()
 }
 
-func newMapNode(data map[interface{}]interface{}, parent, key string) MapNode {
+func newMapNode(c *ConfigSourceProvider, data map[interface{}]interface{}, parent, key string) MapNode {
 	return MapNode{
-		data:   data,
-		parent: parentKey(parent, key),
+		provider: c,
+		data:     data,
+		parent:   parentKey(parent, key),
 	}
 }
 
@@ -205,19 +257,24 @@ func (m MapNode) Keys() []string {
 }
 
 func (m MapNode) Map(key string) MapNode {
-	value, e := m.data[key]
-	if e {
-		return newMapNode(value.(map[interface{}]interface{}), m.parent, key)
+	if value, e := m.data[key]; e {
+		return newMapNode(m.provider, value.(map[interface{}]interface{}), m.parent, key)
 	}
 	if m.change {
 		v := map[interface{}]interface{}{}
 		m.data[key] = v
-		return newMapNode(v, m.parent, key)
+		return newMapNode(m.provider, v, m.parent, key)
 	}
 	return emptyMapNode
 }
 
 func (m MapNode) String(key string, dv string) string {
+
+	if sv, se := m.provider.getSourceValue(m.parent, key); se {
+		m.data[key] = sv
+		return sv
+	}
+
 	value, e := m.data[key]
 	if e && value != nil {
 		return value.(string)
@@ -229,6 +286,14 @@ func (m MapNode) String(key string, dv string) string {
 }
 
 func (m MapNode) Int(key string, dv int) int {
+
+	if sv, se := m.provider.getSourceValue(m.parent, key); se {
+		if v, e := strconv.Atoi(sv); e == nil {
+			m.data[key] = v
+			return v
+		}
+	}
+
 	value, e := m.data[key]
 	if e && value != nil {
 		return value.(int)
@@ -240,6 +305,14 @@ func (m MapNode) Int(key string, dv int) int {
 }
 
 func (m MapNode) Float(key string, dv float64) float64 {
+
+	if sv, se := m.provider.getSourceValue(m.parent, key); se {
+		if v, e := strconv.ParseFloat(sv, 64); e == nil {
+			m.data[key] = v
+			return v
+		}
+	}
+
 	value, e := m.data[key]
 	if e && value != nil {
 		return value.(float64)
@@ -251,6 +324,14 @@ func (m MapNode) Float(key string, dv float64) float64 {
 }
 
 func (m MapNode) Bool(key string, dv bool) bool {
+
+	if sv, se := m.provider.getSourceValue(m.parent, key); se {
+		if v, e := strconv.ParseBool(sv); e == nil {
+			m.data[key] = v
+			return v
+		}
+	}
+
 	value, e := m.data[key]
 	if e && value != nil {
 		return value.(bool)
@@ -262,6 +343,14 @@ func (m MapNode) Bool(key string, dv bool) bool {
 }
 
 func (m MapNode) Duration(key string, dv time.Duration) time.Duration {
+
+	if sv, se := m.provider.getSourceValue(m.parent, key); se {
+		if v, e := time.ParseDuration(sv); e == nil {
+			m.data[key] = v
+			return v
+		}
+	}
+
 	value, e := m.data[key]
 	if e && value != nil {
 		tmp := value.(string)
@@ -277,14 +366,18 @@ func (m MapNode) Duration(key string, dv time.Duration) time.Duration {
 }
 
 func (m MapNode) Time(key string, dv time.Time) time.Time {
+
+	if sv, se := m.provider.getSourceValue(m.parent, key); se {
+		if v, e := stringToTime(sv); e == nil {
+			m.data[key] = v
+			return v
+		}
+	}
+
 	value, e := m.data[key]
 	if e && value != nil {
 		tmp := value.(string)
-		t, e := time.Parse(time.RFC3339Nano, tmp)
-		if e == nil {
-			return t
-		}
-		t, e = time.Parse(time.RFC3339, tmp)
+		t, e := stringToTime(tmp)
 		if e == nil {
 			return t
 		}
@@ -293,6 +386,17 @@ func (m MapNode) Time(key string, dv time.Time) time.Time {
 		m.data[key] = dv
 	}
 	return dv
+}
+
+func stringToTime(tmp string) (time.Time, error) {
+	if t, e := time.Parse(time.RFC3339Nano, tmp); e == nil {
+		return t, nil
+	}
+	t, e := time.Parse(time.RFC3339, tmp)
+	if e == nil {
+		return t, nil
+	}
+	return time.Time{}, e
 }
 
 func (m MapNode) StringL(key string, dv []string) []string {

@@ -44,11 +44,11 @@ type Config struct {
 func TestExtension(t *testing.T) {
 
 	d := os.DirFS(".")
-	err := Default.LoadYaml(d)
+	err := Default.Init(d)
 	assert.Nil(t, err)
 
 	c := ConfigStruct2{}
-	db := Default.Root().Map("app").Map("db")
+	db := Default.Map().Map("app").Map("db")
 
 	c.App.Db.User = db.String("user", "defaultValue1")
 	assert.Equal(t, "test_user", c.App.Db.User)
@@ -73,21 +73,35 @@ func TestExtension(t *testing.T) {
 	assert.Equal(t, "n1", c.App.Db.Data["key1"].Name)
 	assert.Equal(t, 123, c.App.Db.Data["key1"].Value)
 
-	r := Default.Root()
+	r := Default.Map()
 	assert.Equal(t, -9223372036854775808, r.Int("int", 0))
 	assert.Equal(t, 1.34, r.Float("float", 0))
 	assert.Equal(t, "2018-01-09 10:40:47 +0000 UTC", fmt.Sprintf("%v", r.Time("time", time.Now())))
+}
+
+func TestConfigKeys(t *testing.T) {
+
+	d := os.DirFS(".")
+	err := Default.Init(d)
+	assert.Nil(t, err)
+	assert.Equal(t, "test_user", Default.String("app.db.user", "defaultValue1"))
+	assert.Equal(t, "test_password", Default.String("app.db.password", "defaultValue1"))
+	assert.Equal(t, 1.34, Default.Float("float", 0))
+	assert.Equal(t, -9223372036854775808, Default.Int("int", 0))
+	assert.Equal(t, "2018-01-09 10:40:47 +0000 UTC", fmt.Sprintf("%v", Default.Time("time", time.Now())))
+
+	assert.Equal(t, "n1", Default.String("app.db.data.key1.name", "defaultValue1"))
 }
 
 func TestExtensionProfileDev(t *testing.T) {
 
 	d := os.DirFS(".")
 	Default.SetProfile("dev")
-	err := Default.LoadYaml(d)
+	err := Default.Init(d)
 	assert.Nil(t, err)
 
 	c := ConfigStruct2{}
-	db := Default.Root().Map("app").Map("db")
+	db := Default.Map().Map("app").Map("db")
 	c.App.Db.User = db.String("user", "defaultValue1")
 	assert.Equal(t, "test_user_dev", c.App.Db.User)
 }
@@ -96,11 +110,11 @@ func TestExtensionProfileTest(t *testing.T) {
 
 	d := os.DirFS(".")
 	Default.SetProfile("test")
-	err := Default.LoadYaml(d)
+	err := Default.Init(d)
 	assert.Nil(t, err)
 
 	c := ConfigStruct2{}
-	db := Default.Root().Map("app").Map("db")
+	db := Default.Map().Map("app").Map("db")
 	c.App.Db.User = db.String("user", "defaultValue1")
 	assert.Equal(t, "defaultValue1", c.App.Db.User)
 }
