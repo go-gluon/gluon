@@ -8,18 +8,18 @@ import (
 )
 
 const (
-	configPrefix = "gluon."
+	configPrefix = "gluon"
 )
 
 var (
 	// Default configuration source provider instance
 	Default *ConfigSourceProvider
 	// ConfigProfileProperty configuration profile property
-	configProfileProperty = configPrefix + "config.profile"
+	configProfileProperty = configPrefix + ".config.profile"
 )
 
 type ConfigReader interface {
-	ReadFromSource(node MapNode)
+	ReadFromMapNode(node MapNode) error
 }
 
 // ConfigSource configuration source interface
@@ -69,10 +69,16 @@ type void struct{}
 
 // ConfigSourceProvider configuration source provider
 type ConfigSourceProvider struct {
-	sources []ConfigSource
-	data    map[interface{}]interface{}
-	profile string
-	cache   map[string]void
+	sources      []ConfigSource
+	data         map[interface{}]interface{}
+	profile      string
+	cache        map[string]void
+	mapNode      MapNode
+	extensionMap MapNode
+}
+
+func (c *ConfigSourceProvider) InitExtension(name string, reader ConfigReader) error {
+	return reader.ReadFromMapNode(c.extensionMap.Map(name))
 }
 
 // SetProfile set configuration profile to provider
@@ -138,6 +144,11 @@ func (c *ConfigSourceProvider) Init(resources fs.FS) error {
 			}
 		}
 	}
+
+	c.mapNode = newMapNode(c, c.data, "", "")
+	c.extensionMap = c.mapNode.Map(configPrefix)
+	c.extensionMap.change = true
+
 	return nil
 }
 
@@ -165,7 +176,7 @@ func merge(profile, config map[interface{}]interface{}) {
 }
 
 func (c *ConfigSourceProvider) Map() MapNode {
-	return newMapNode(c, c.data, "", "")
+	return c.mapNode
 }
 
 func (c *ConfigSourceProvider) String(key string, dv string) string {
@@ -180,7 +191,7 @@ func (c *ConfigSourceProvider) Int(key string, dv int) int {
 
 func (c *ConfigSourceProvider) Float(key string, dv float64) float64 {
 	m, k := c.findMap(key)
-	return m.Float(k, dv)
+	return m.Float64(k, dv)
 }
 
 func (c *ConfigSourceProvider) Bool(key string, dv bool) bool {
@@ -304,7 +315,7 @@ func (m MapNode) Int(key string, dv int) int {
 	return dv
 }
 
-func (m MapNode) Float(key string, dv float64) float64 {
+func (m MapNode) Float64(key string, dv float64) float64 {
 
 	if sv, se := m.provider.getSourceValue(m.parent, key); se {
 		if v, e := strconv.ParseFloat(sv, 64); e == nil {
@@ -431,7 +442,7 @@ func (m MapNode) IntL(key string, dv []int) []int {
 	return dv
 }
 
-func (m MapNode) FloatL(key string, dv []float64) []float64 {
+func (m MapNode) Float64L(key string, dv []float64) []float64 {
 	value, e := m.data[key]
 	if e && value != nil {
 		list := value.([]interface{})
@@ -456,6 +467,78 @@ func (m MapNode) BoolL(key string, dv []bool) []bool {
 			tmp[i] = item.(bool)
 		}
 		return tmp
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) StringM(key string, dv map[string]string) map[string]string {
+	value, e := m.data[key]
+	if !e || value == nil {
+		return dv
+	}
+	if m, ok := value.(map[interface{}]interface{}); ok {
+		r := map[string]string{}
+		for k, v := range m {
+			r[k.(string)] = v.(string)
+		}
+		return r
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) IntM(key string, dv map[string]int) map[string]int {
+	value, e := m.data[key]
+	if !e || value == nil {
+		return dv
+	}
+	if m, ok := value.(map[interface{}]interface{}); ok {
+		r := map[string]int{}
+		for k, v := range m {
+			r[k.(string)] = v.(int)
+		}
+		return r
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) Float64M(key string, dv map[string]float64) map[string]float64 {
+	value, e := m.data[key]
+	if !e || value == nil {
+		return dv
+	}
+	if m, ok := value.(map[interface{}]interface{}); ok {
+		r := map[string]float64{}
+		for k, v := range m {
+			r[k.(string)] = v.(float64)
+		}
+		return r
+	}
+	if m.change {
+		m.data[key] = dv
+	}
+	return dv
+}
+
+func (m MapNode) BoolM(key string, dv map[string]bool) map[string]bool {
+	value, e := m.data[key]
+	if !e || value == nil {
+		return dv
+	}
+	if m, ok := value.(map[interface{}]interface{}); ok {
+		r := map[string]bool{}
+		for k, v := range m {
+			r[k.(string)] = v.(bool)
+		}
+		return r
 	}
 	if m.change {
 		m.data[key] = dv

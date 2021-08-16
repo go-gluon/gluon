@@ -18,7 +18,9 @@ app:
         name: n2
         value: 456
 property: "test1"
-
+mapString:
+  A: "1"
+  B: "2"
 +dev:
   app:
     db:

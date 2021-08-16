@@ -16,7 +16,7 @@ type ExtensionInfo struct {
 type Extension interface {
 	Info() ExtensionInfo
 	Configuration() interface{}
-	Create(resources *embed.FS) error
+	Init(resources *embed.FS) error
 }
 
 type ExtensionProvider interface {
@@ -67,11 +67,16 @@ func RegisterExtensions(resources *embed.FS, providers ...ExtensionProvider) err
 }
 
 func registerExtensions(e Extension, resources *embed.FS) error {
-	// if e.Configuration() != nil {
-	// 	// err := config.Extension(e.Info().Name, e.Configuration())
-	// 	// if err != nil {
-	// 	// 	return err
-	// 	// }
-	// }
-	return e.Create(resources)
+
+	// setup extension configuration
+	if e.Configuration() != nil {
+		if reader, ok := e.Configuration().(config.ConfigReader); ok {
+			if err := config.Default.InitExtension(e.Info().Name, reader); err != nil {
+				return err
+			}
+		}
+	}
+
+	// initialize the extension
+	return e.Init(resources)
 }

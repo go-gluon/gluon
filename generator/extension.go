@@ -154,6 +154,6 @@ var _ = gluon.RegisterExtensions({{ if .IsResource }}&resources{{ else }}nil{{ e
 {{end}})
 
 func init() {
-	gluon.InitExtensions()
+	gluon.Init()
 }
 `

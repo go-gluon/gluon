@@ -75,8 +75,13 @@ func TestExtension(t *testing.T) {
 
 	r := Default.Map()
 	assert.Equal(t, -9223372036854775808, r.Int("int", 0))
-	assert.Equal(t, 1.34, r.Float("float", 0))
+	assert.Equal(t, 1.34, r.Float64("float", 0))
 	assert.Equal(t, "2018-01-09 10:40:47 +0000 UTC", fmt.Sprintf("%v", r.Time("time", time.Now())))
+
+	ms := Default.Map().StringM("mapString", map[string]string{})
+	assert.Equal(t, 2, len(ms))
+	assert.Equal(t, "1", ms["A"])
+	assert.Equal(t, "2", ms["B"])
 }
 
 func TestConfigKeys(t *testing.T) {
