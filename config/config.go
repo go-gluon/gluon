@@ -255,6 +255,7 @@ func newMapNode(c *ConfigSourceProvider, data map[interface{}]interface{}, paren
 	}
 }
 
+// Keys returns list of keys
 func (m MapNode) Keys() []string {
 	keys := []string{}
 	if len(m.data) > 0 {
@@ -267,6 +268,7 @@ func (m MapNode) Keys() []string {
 	return keys
 }
 
+// Map returns MapNode for the key
 func (m MapNode) Map(key string) MapNode {
 	if value, e := m.data[key]; e {
 		return newMapNode(m.provider, value.(map[interface{}]interface{}), m.parent, key)
@@ -279,6 +281,7 @@ func (m MapNode) Map(key string) MapNode {
 	return emptyMapNode
 }
 
+// String returns string or default value
 func (m MapNode) String(key string, dv string) string {
 
 	if sv, se := m.provider.getSourceValue(m.parent, key); se {
@@ -296,6 +299,7 @@ func (m MapNode) String(key string, dv string) string {
 	return dv
 }
 
+// Int returns int or default value
 func (m MapNode) Int(key string, dv int) int {
 
 	if sv, se := m.provider.getSourceValue(m.parent, key); se {
@@ -315,6 +319,7 @@ func (m MapNode) Int(key string, dv int) int {
 	return dv
 }
 
+// Float64 returns float64 or default value
 func (m MapNode) Float64(key string, dv float64) float64 {
 
 	if sv, se := m.provider.getSourceValue(m.parent, key); se {
@@ -334,6 +339,7 @@ func (m MapNode) Float64(key string, dv float64) float64 {
 	return dv
 }
 
+// Bool returns bool or default value
 func (m MapNode) Bool(key string, dv bool) bool {
 
 	if sv, se := m.provider.getSourceValue(m.parent, key); se {
@@ -353,6 +359,7 @@ func (m MapNode) Bool(key string, dv bool) bool {
 	return dv
 }
 
+// Duration returns duration or default value
 func (m MapNode) Duration(key string, dv time.Duration) time.Duration {
 
 	if sv, se := m.provider.getSourceValue(m.parent, key); se {
@@ -376,6 +383,7 @@ func (m MapNode) Duration(key string, dv time.Duration) time.Duration {
 	return dv
 }
 
+// Time returns time or default value if value is null or not a string time representation
 func (m MapNode) Time(key string, dv time.Time) time.Time {
 
 	if sv, se := m.provider.getSourceValue(m.parent, key); se {
@@ -399,6 +407,7 @@ func (m MapNode) Time(key string, dv time.Time) time.Time {
 	return dv
 }
 
+// stringToTime convert string to time
 func stringToTime(tmp string) (time.Time, error) {
 	if t, e := time.Parse(time.RFC3339Nano, tmp); e == nil {
 		return t, nil
@@ -410,6 +419,7 @@ func stringToTime(tmp string) (time.Time, error) {
 	return time.Time{}, e
 }
 
+// StringL returns list of strings
 func (m MapNode) StringL(key string, dv []string) []string {
 	value, e := m.data[key]
 	if e && value != nil {
@@ -426,6 +436,7 @@ func (m MapNode) StringL(key string, dv []string) []string {
 	return dv
 }
 
+// IntL returns list of integers
 func (m MapNode) IntL(key string, dv []int) []int {
 	value, e := m.data[key]
 	if e && value != nil {
@@ -442,6 +453,7 @@ func (m MapNode) IntL(key string, dv []int) []int {
 	return dv
 }
 
+// Float64L returns list of float64
 func (m MapNode) Float64L(key string, dv []float64) []float64 {
 	value, e := m.data[key]
 	if e && value != nil {
@@ -458,6 +470,7 @@ func (m MapNode) Float64L(key string, dv []float64) []float64 {
 	return dv
 }
 
+// BoolL returns list of booleans
 func (m MapNode) BoolL(key string, dv []bool) []bool {
 	value, e := m.data[key]
 	if e && value != nil {
@@ -474,6 +487,7 @@ func (m MapNode) BoolL(key string, dv []bool) []bool {
 	return dv
 }
 
+// StringM returns map of strings
 func (m MapNode) StringM(key string, dv map[string]string) map[string]string {
 	value, e := m.data[key]
 	if !e || value == nil {
@@ -492,6 +506,7 @@ func (m MapNode) StringM(key string, dv map[string]string) map[string]string {
 	return dv
 }
 
+// IntM returns map of integers
 func (m MapNode) IntM(key string, dv map[string]int) map[string]int {
 	value, e := m.data[key]
 	if !e || value == nil {
@@ -510,6 +525,7 @@ func (m MapNode) IntM(key string, dv map[string]int) map[string]int {
 	return dv
 }
 
+// Float64M returns map of float64
 func (m MapNode) Float64M(key string, dv map[string]float64) map[string]float64 {
 	value, e := m.data[key]
 	if !e || value == nil {
@@ -528,6 +544,7 @@ func (m MapNode) Float64M(key string, dv map[string]float64) map[string]float64 
 	return dv
 }
 
+// BoolM return map of booleans
 func (m MapNode) BoolM(key string, dv map[string]bool) map[string]bool {
 	value, e := m.data[key]
 	if !e || value == nil {
@@ -544,4 +561,16 @@ func (m MapNode) BoolM(key string, dv map[string]bool) map[string]bool {
 		m.data[key] = dv
 	}
 	return dv
+}
+
+// MapFunc iterate over map
+func (m MapNode) MapFunc(fun func(key string, node MapNode)) {
+	if len(m.data) == 0 {
+		return
+	}
+	for k := range m.data {
+		if key, ok := k.(string); ok {
+			fun(key, m.Map(key))
+		}
+	}
 }

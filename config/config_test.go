@@ -123,3 +123,30 @@ func TestExtensionProfileTest(t *testing.T) {
 	c.App.Db.User = db.String("user", "defaultValue1")
 	assert.Equal(t, "defaultValue1", c.App.Db.User)
 }
+
+func TestMapFunc(t *testing.T) {
+
+	d := os.DirFS(".")
+	err := Default.Init(d)
+	assert.Nil(t, err)
+
+	c := ConfigStruct2{}
+
+	db := Default.Map().Map("app").Map("db")
+
+	if c.App.Db.Data == nil {
+		c.App.Db.Data = map[string]ConfigStruct2Data{}
+	}
+	db.Map("data").MapFunc(func(key string, node MapNode) {
+		cc, e := c.App.Db.Data[key]
+		if !e {
+			cc = ConfigStruct2Data{}
+		}
+		cc.Name = node.String("name", cc.Name)
+		cc.Value = node.Int("value", cc.Value)
+		c.App.Db.Data[key] = cc
+	})
+	assert.Equal(t, 2, len(c.App.Db.Data))
+	assert.Equal(t, "n1", c.App.Db.Data["key1"].Name)
+	assert.Equal(t, 123, c.App.Db.Data["key1"].Value)
+}
