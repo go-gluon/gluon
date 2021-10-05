@@ -1,11 +1,7 @@
 package log
 
-import (
-	"fmt"
-)
-
 var (
-	Log Logger = SimpleLogger{}
+	Log Logger = NewSimpleLogger()
 )
 
 type Fields map[string]interface{}
@@ -58,30 +54,4 @@ type Logger interface {
 	Info(msg string, fields ...map[string]interface{})
 	Warn(msg string, fields ...map[string]interface{})
 	Error(msg string, fields ...map[string]interface{})
-}
-
-type SimpleLogger struct {
-}
-
-func (d SimpleLogger) Trace(msg string, fields ...map[string]interface{}) {
-	fmt.Printf("[TRACE] %s %v\n", msg, fmt.Sprint(fields))
-}
-
-func (d SimpleLogger) Debug(msg string, fields ...map[string]interface{}) {
-	if len(fields) > 0 {
-		fmt.Printf("[DEBUG] %s %v\n", msg, fmt.Sprint(fields))
-	}
-	fmt.Printf("[DEBUG] %s\n", msg)
-}
-
-func (d SimpleLogger) Info(msg string, fields ...map[string]interface{}) {
-	fmt.Printf(" [INFO] %s %v\n", msg, fmt.Sprint(fields))
-}
-
-func (d SimpleLogger) Warn(msg string, fields ...map[string]interface{}) {
-	fmt.Printf(" [WARN] %s %v\n", msg, fmt.Sprint(fields))
-}
-
-func (d SimpleLogger) Error(msg string, fields ...map[string]interface{}) {
-	fmt.Printf("[ERROR] %s %v\n", msg, fmt.Sprint(fields))
 }

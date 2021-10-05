@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-gluon/gluon/log"
 )
 
 const (
@@ -131,6 +133,7 @@ func (c *ConfigSourceProvider) getSourceRawValue(name string) (string, bool) {
 
 func (c *ConfigSourceProvider) Init(resources fs.FS) error {
 	data, err := loadYaml(resources)
+	log.Debug("Yaml configuration", log.Fields{"yaml": data}.Err(err))
 	if err != nil {
 		return err
 	}
@@ -147,6 +150,10 @@ func (c *ConfigSourceProvider) Init(resources fs.FS) error {
 
 	c.mapNode = newMapNode(c, c.data, "", "")
 	c.extensionMap = c.mapNode.Map(configPrefix)
+	// fix empty map
+	if c.extensionMap.data == nil {
+		c.extensionMap.data = map[interface{}]interface{}{}
+	}
 	c.extensionMap.change = true
 
 	return nil

@@ -2,81 +2,129 @@ package gluon
 
 import (
 	"embed"
-	"sort"
+	"fmt"
+	"time"
 
 	"github.com/go-gluon/gluon/config"
 	"github.com/go-gluon/gluon/log"
 )
 
-type ExtensionInfo struct {
-	Name     string
-	Priority int
+var (
+	G     *Gluon
+	start = time.Now()
+)
+
+type Annotation struct{}
+
+type GluonInfo struct {
+	appName    string
+	appVersion string
+	version    string
 }
 
-type Extension interface {
-	Info() ExtensionInfo
-	Configuration() interface{}
-	Init(resources *embed.FS) error
+func (a GluonInfo) AppName() string {
+	return a.appName
 }
 
-type ExtensionProvider interface {
-	NewExtension() Extension
+func (a GluonInfo) AppVersion() string {
+	return a.appVersion
 }
 
-var extensions []Extension
+func (a GluonInfo) Version() string {
+	return a.version
+}
 
-func RegisterExtensions(resources *embed.FS, providers ...ExtensionProvider) error {
+type Runtime struct {
+	config    *config.ConfigSourceProvider
+	resources *embed.FS
+}
+
+func (r *Runtime) init() {
 	// core modules
-	if resources != nil {
-		err := config.Default.Init(resources)
+	if r.resources != nil {
+		err := r.config.Init(r.resources)
 		if err != nil {
 			panic(err)
 		}
 	}
+}
+
+type Gluon struct {
+	info     *GluonInfo
+	runtime  *Runtime
+	ext      []*ExtensionRuntime
+	services []*ExtensionRuntime
+}
+
+func CreateGluon(appName, appVersion, version string, resources *embed.FS, ext ...*ExtensionRuntime) *Gluon {
+
+	G = &Gluon{
+		info:     &GluonInfo{appName: appName, appVersion: appVersion, version: version},
+		runtime:  &Runtime{resources: resources, config: config.Default},
+		ext:      ext,
+		services: []*ExtensionRuntime{},
+	}
+	if err := G.init(); err != nil {
+		panic(err)
+	}
+	return G
+}
+
+func (g *Gluon) init() error {
+
+	// initialize runtime core modules
+	g.runtime.init()
 
 	// activate extension
-	names := []string{}
-	if len(providers) > 0 {
-		extensions = make([]Extension, len(providers))
-		tmp := make([]string, len(providers))
-
-		for i, e := range providers {
-			ex := e.NewExtension()
-			extensions[i] = ex
-			tmp[i] = ex.Info().Name
-		}
-
-		// sort extension base on the priority
-		sort.Slice(extensions, func(i, j int) bool {
-			return extensions[i].Info().Priority < extensions[j].Info().Priority
-		})
+	size := len(g.ext)
+	names := make([]string, size)
+	if size > 0 {
 
 		// register extension
-		for _, e := range extensions {
-			err := registerExtensions(e, resources)
+		for i, e := range g.ext {
+			err := g.initExtension(e)
 			if err != nil {
 				panic(err)
 			}
-		}
+			names[i] = e.name
 
-		names = append(names, tmp...)
+			if e.service {
+				g.services = append(g.services, e)
+			}
+		}
 	}
 
-	log.Info("Gluon", log.Fields{"version": "v0.0.0", "extensions": names})
+	log.Info(fmt.Sprintf("gluon extensions %v", names))
 	return nil
 }
 
-func registerExtensions(e Extension, resources *embed.FS) error {
+func (r *Gluon) initExtension(e *ExtensionRuntime) error {
 
 	// setup extension configuration
-	if e.Configuration() != nil {
-		if reader, ok := e.Configuration().(config.ConfigReader); ok {
-			if err := config.Default.InitExtension(e.Info().Name, reader); err != nil {
+	econfig := e.ext.InitConfig()
+	if econfig != nil {
+		if reader, ok := econfig.(config.ConfigReader); ok {
+			if err := config.Default.InitExtension(e.name, reader); err != nil {
 				return err
 			}
+		} else {
+			log.Warn("Configuration does not implements ConfigReader", log.Fields{"extension": e.name})
 		}
 	}
 
 	// initialize the extension
-	return e.Init(resources)
+	return e.ext.Init(r.info, r.runtime)
+}
+
+func (g *Gluon) Start() {
+	shutdown := make(chan bool)
+	for _, e := range g.services {
+		x := e
+		go func() {
+			x.ext.Start()
+			shutdown <- true
+		}()
+	}
+	log.Info(fmt.Sprintf("%v %v (powered by gluon %v) started in %v", g.info.appName, g.info.appVersion, g.info.version, time.Since(start)))
+	<-shutdown
 }
